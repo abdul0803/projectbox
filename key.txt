@@ -1,0 +1,5 @@
+{
+    subscription_key="5rOi74swZtG1wwdfL73YqusynDLWlxFMAqpwMvMA3WXCWE3Samg8JQQJ99AKACYeBjFXJ3w3AAAFACOGSRqa"
+endpoint="https://boxedvision.cognitiveservices.azure.com/"
+
+}
