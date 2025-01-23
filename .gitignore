@@ -1,0 +1,44 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environment directory
+box_project_env/
+
+# VS Code directory (optional, if you're using VS Code)
+.vscode/
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Unit test / coverage reports
+.coverage
+.tox/
+.nox/
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook stuff
+.ipynb_checkpoints
+
+# PyCharm directory (optional, if you're using PyCharm)
+.idea/
+
+vision-ocr-project-448520-47a94d8a53c2.json
+
+key.txt
