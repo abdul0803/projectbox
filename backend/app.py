@@ -5,17 +5,15 @@ import cv2
 from google.cloud import vision
 import io
 import numpy as np
+import re
 
 app = Flask(__name__)
 
 # Azure Custom Vision API credentials
-PREDICTION_URL = "https://customevisionproj-prediction.cognitiveservices.azure.com/customvision/v3.0/Prediction/861b01aa-d77c-4118-8ca1-617c27a75487/detect/iterations/Iteration6/image"
-PREDICTION_KEY = "7LJBYddFtLFqnpnj8tBA41MZeSv0trInQGTSP1874tvFpX6zKP9IJQQJ99AKACYeBjFXJ3w3AAAIACOG5wcU"
 
 # Google Vision OCR setup
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "C:/Users/abdua/OneDrive/projects/projectbox/backend/vision-ocr-project-448520-47a94d8a53c2.json"
 vision_client = vision.ImageAnnotatorClient()
-
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -99,11 +97,13 @@ def upload_file():
             "ocr_text": ocr_text
         })
 
+    # Postprocess OCR results to clean and structure data
+    postprocessed_results = postprocess_ocr_results(ocr_results)
+
     return jsonify({
         "file": file.filename,
-        "ocr_results": ocr_results
+        "ocr_results": postprocessed_results
     }), 200
-
 
 # Helper function to calculate bounding box
 def calculate_bounding_box(bbox, image_shape, padding_x_factor=0.1, padding_y_factor=0.1):
@@ -123,7 +123,6 @@ def calculate_bounding_box(bbox, image_shape, padding_x_factor=0.1, padding_y_fa
     h = min(height - y, h + 2 * padding_y)
 
     return x, y, w, h
-
 
 # Helper function to adjust bounding box based on noise
 def adjust_bounding_box(handwriting_bbox, noise_bboxes, overlap_threshold=0.00):
@@ -155,7 +154,6 @@ def adjust_bounding_box(handwriting_bbox, noise_bboxes, overlap_threshold=0.00):
 
     return x1_hand, y1_hand, x2_hand, y2_hand
 
-
 # Function to segment red handwriting
 def segment_red_handwriting(image_path):
     # Load the image
@@ -184,6 +182,7 @@ def segment_red_handwriting(image_path):
     grayscale_result = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
 
     return grayscale_result
+
 # Helper function to perform OCR using Google Vision
 def perform_ocr_google(image_path):
     with io.open(image_path, 'rb') as image_file:
@@ -200,6 +199,51 @@ def perform_ocr_google(image_path):
         return texts[0].description.strip()  # Return the full detected text
     return "No text detected"
 
+# Postprocessing OCR results to clean and structure data
+def postprocess_ocr_results(ocr_results):
+    cleaned_results = []
+    box_number = None
+
+    for result in ocr_results:
+        text = result["ocr_text"].strip()
+
+        # Skip empty text results
+        if not text:
+            continue
+
+        # Split multiline text
+        lines = text.split("\n")
+        for line in lines:
+            line = line.strip()
+
+            # Detect box number (standalone numeric line or circled numbers)
+            if re.match(r"^\d{1,5}$", line) and not box_number:
+                box_number = line
+                continue
+
+            # Match item patterns: "<quantity> <item name>"
+            match = re.match(r"(\d+)[\s:-]*(.+)", line)
+            if match:
+                quantity = int(match.group(1))
+                item_name = match.group(2).strip()
+
+                # Clean up item names (e.g., remove leading dots or unnecessary spaces)
+                item_name = re.sub(r"^[.\\-]*", "", item_name).strip().lower()
+
+                # Validate item name
+                if len(item_name) > 2:  # Avoid short/noisy names
+                    cleaned_results.append({"name": item_name, "quantity": quantity})
+
+    # Deduplicate items
+    deduplicated_results = []
+    seen_items = set()
+    for item in cleaned_results:
+        item_key = f"{item['name'].lower()}_{item['quantity']}"
+        if item_key not in seen_items:
+            deduplicated_results.append(item)
+            seen_items.add(item_key)
+
+    return {"items": deduplicated_results, "box_number": box_number}
 
 if __name__ == "__main__":
     app.run(debug=True)
