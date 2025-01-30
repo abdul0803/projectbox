@@ -10,6 +10,8 @@ import re
 app = Flask(__name__)
 
 # Azure Custom Vision API credentials
+PREDICTION_URL = "https://customevisionproj-prediction.cognitiveservices.azure.com/customvision/v3.0/Prediction/861b01aa-d77c-4118-8ca1-617c27a75487/detect/iterations/Iteration6/image"
+PREDICTION_KEY = "7LJBYddFtLFqnpnj8tBA41MZeSv0trInQGTSP1874tvFpX6zKP9IJQQJ99AKACYeBjFXJ3w3AAAIACOG5wcU"
 
 # Google Vision OCR setup
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "C:/Users/abdua/OneDrive/projects/projectbox/backend/vision-ocr-project-448520-47a94d8a53c2.json"
@@ -185,65 +187,85 @@ def segment_red_handwriting(image_path):
 
 # Helper function to perform OCR using Google Vision
 def perform_ocr_google(image_path):
+    # Read the image content
     with io.open(image_path, 'rb') as image_file:
         content = image_file.read()
 
+    # Save a copy of the image Google OCR is processing for debugging
+    debug_folder = "./debug_ocr_inputs/"
+    os.makedirs(debug_folder, exist_ok=True)
+    debug_image_path = os.path.join(debug_folder, os.path.basename(image_path))
+    cv2.imwrite(debug_image_path, cv2.imread(image_path))  # Save the actual image being processed
+
+    print(f"[DEBUG] Google OCR Processing: {debug_image_path}")
+
+    # Send the image to Google OCR
     image = vision.Image(content=content)
     response = vision_client.text_detection(image=image)
-    texts = response.text_annotations
 
+    # Log Google OCR response
     if response.error.message:
-        raise Exception(f"Google Vision OCR Error: {response.error.message}")
+        print(f"[ERROR] Google OCR Error: {response.error.message}")
+        return "OCR Error"
 
+    texts = response.text_annotations
     if texts:
-        return texts[0].description.strip()  # Return the full detected text
+        detected_text = texts[0].description.strip()
+        print(f"[DEBUG] Google OCR Detected: {detected_text}")
+        return detected_text
+
+    print("[DEBUG] Google OCR detected no text")
     return "No text detected"
 
 # Postprocessing OCR results to clean and structure data
+
 def postprocess_ocr_results(ocr_results):
     cleaned_results = []
     box_number = None
 
+    print(f"[DEBUG] Raw OCR Results: {ocr_results}")  # Log full OCR results
+    
     for result in ocr_results:
         text = result["ocr_text"].strip()
 
-        # Skip empty text results
+        print(f"[DEBUG] Processing OCR Text: {text}")
+
         if not text:
             continue
 
-        # Split multiline text
+        # Split text into lines
         lines = text.split("\n")
         for line in lines:
             line = line.strip()
 
-            # Detect box number (standalone numeric line or circled numbers)
+            # Detect box number (standalone numeric line)
             if re.match(r"^\d{1,5}$", line) and not box_number:
                 box_number = line
+                print(f"[DEBUG] Detected Box Number: {box_number}")
                 continue
+
+            # Check for numbers at the end of text (if not already detected)
+            possible_numbers = re.findall(r"\b\d{2,5}\b", line)  # Look for 2-5 digit numbers
+            if possible_numbers and not box_number:
+                box_number = possible_numbers[-1]  # Take the last found number
+                print(f"[DEBUG] Box Number Found in Text: {box_number}")
+                continue
+
+            # Fix misrecognized 'I' as '1'
+            line = re.sub(r"^I\s", "1 ", line, flags=re.IGNORECASE)
 
             # Match item patterns: "<quantity> <item name>"
             match = re.match(r"(\d+)[\s:-]*(.+)", line)
             if match:
                 quantity = int(match.group(1))
-                item_name = match.group(2).strip()
+                item_name = match.group(2).strip().lower()
+                item_name = re.sub(r"^[.\\-]*", "", item_name).strip()  # Clean up text
 
-                # Clean up item names (e.g., remove leading dots or unnecessary spaces)
-                item_name = re.sub(r"^[.\\-]*", "", item_name).strip().lower()
-
-                # Validate item name
                 if len(item_name) > 2:  # Avoid short/noisy names
                     cleaned_results.append({"name": item_name, "quantity": quantity})
+                    print(f"[DEBUG] Extracted Item: {item_name}, Quantity: {quantity}")
 
-    # Deduplicate items
-    deduplicated_results = []
-    seen_items = set()
-    for item in cleaned_results:
-        item_key = f"{item['name'].lower()}_{item['quantity']}"
-        if item_key not in seen_items:
-            deduplicated_results.append(item)
-            seen_items.add(item_key)
-
-    return {"items": deduplicated_results, "box_number": box_number}
+    return {"items": cleaned_results, "box_number": box_number}
 
 if __name__ == "__main__":
     app.run(debug=True)
